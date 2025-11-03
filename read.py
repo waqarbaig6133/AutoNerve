@@ -1,8 +1,8 @@
 import numpy as np
-import cv2 as cv
-import ultralytics as ul
+#import cv2 as cv
+#import ultralytics as ul
 import pandas as pd
-import matplotlib as mt #Statistical chart of how often the cars are present in the footage
+#import matplotlib as mt #Statistical chart of how often the cars are present in the footage
 import torch
 from torch import save, load
 import torchvision as tv
@@ -22,19 +22,16 @@ transform = transforms.Compose([
 ])
 
 DataHonda = Honda(
-    csv_file='/home/waqar/Programming/CarView/honda_image_dataset_v2/HondaCarsV1_cleaned.csv',
-    root_dir='/home/waqar/Programming/CarView/Honda_resized',
+    csv_file="C:\\Users\\b_waqa\\Downloads\\HondaCarsV2.csv",
+    root_dir="C:\\Users\\b_waqa\\PycharmProjects\\PythonProject\\Honda_resized",
     transform=transform
 )
 #set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 batch_size = 32
-#Load custom Honda Datasets
-image_size = 10354
 
 
-DataHonda = Honda(csv_file = '/home/waqar/Programming/CarView/honda_image_dataset_v2/HondaCarsV1_cleaned.csv', root_dir = '/home/waqar/Programming/CarView/Honda_resized', transform=transform)
 
 train_size = int(0.8 * len(DataHonda))
 test_size = len(DataHonda) - train_size
@@ -78,6 +75,8 @@ class HondaClassifier(nn.Module):
 hondaclf = HondaClassifier().to(device)
 hondaopt = Adam(hondaclf.parameters(), lr=1e-3)
 loss_fn = nn.CrossEntropyLoss()
+
+
 
 #Training
 if __name__ == "__main__":
