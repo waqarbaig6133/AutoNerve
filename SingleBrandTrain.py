@@ -15,14 +15,13 @@ from PIL import Image
 import os
 from PIL import UnidentifiedImageError
 
-#Code was done in Colab, but idk why the hell it's not loading on github.
-
 from google.colab import drive
-drive.mount('/content/drive') 
+drive.mount('/content/drive')
 
 device = torch.device("cpu")
 if torch.cuda.is_available():
-  device = torch.device("cuda") #Trained with A100 Colab GPU. Perfect for budget PCs
+  device = torch.device("cuda")
+print(device)
 
 transform = transforms.Compose([
     transforms.Resize((480, 640)),
@@ -33,7 +32,7 @@ transform = transforms.Compose([
     )
 ]) # Preprocess images. Tensor has value from 0 to 1, the normalize from -1 to 1, instead of so many colors
 
-train_dataset = torchvision.datasets.ImageFolder(root = '/content/drive/MyDrive/honda_cars', transform = transform) #17 difference classes or models, ~11400 training pics
+train_dataset = torchvision.datasets.ImageFolder(root = '/content/drive/MyDrive/honda_cars', transform = transform)
 # Filter out dummy samples with label -1
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size = 32, shuffle = True)
 
@@ -66,7 +65,6 @@ net.to(device)
 loss_function = nn.NLLLoss()
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 
-#Should include a script to remove any images that are corrupt in the datasets folder with UnindentifiedImage from PIL. It worked sometimes
 epochs = 10
 for epoch in range(epochs):
     running_loss = 0.0
@@ -89,9 +87,3 @@ for epoch in range(epochs):
             running_loss = 0.0
 
 print("Finished Training")
-
-
-
-
-
-
