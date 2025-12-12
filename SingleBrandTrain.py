@@ -1,89 +1,157 @@
 import torch
 import torch.nn as nn
-import torch.nn.modules
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from torchsummary import summary
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-from torch.utils.data import Dataset, dataloader
-import PIL
-from PIL import Image
-import os
-from PIL import UnidentifiedImageError
-
+from torch.utils.data import DataLoader, random_split
+from torchvision import models
 from google.colab import drive
+from PIL import Image, ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 drive.mount('/content/drive')
 
-device = torch.device("cpu")
-if torch.cuda.is_available():
-  device = torch.device("cuda")
-print(device)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using:", device)
 
-transform = transforms.Compose([
-    transforms.Resize((480, 640)),
+# -------------------------------------------------------
+# TRANSFORMS (ImageNet normalization + lighter augment)
+# -------------------------------------------------------
+train_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize(
-        (0.5, 0.5, 0.5),
-        (0.5, 0.5, 0.5)
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
     )
-]) # Preprocess images. Tensor has value from 0 to 1, the normalize from -1 to 1, instead of so many colors
+])
 
-train_dataset = torchvision.datasets.ImageFolder(root = '/content/drive/MyDrive/honda_cars', transform = transform)
-# Filter out dummy samples with label -1
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size = 32, shuffle = True)
+test_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
+])
 
-class HondaNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 64, 3)
-        self.conv2 = nn.Conv2d(64, 128, 3)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.gap = nn.AdaptiveAvgPool2d((6, 6))  # makes it work for any input size
-        self.fc1 = nn.Linear(128 * 6 * 6, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 17)
+# -------------------------------------------------------
+# DATASET + VALIDATION SPLIT
+# -------------------------------------------------------
+full_dataset = torchvision.datasets.ImageFolder(
+    root='/content/drive/MyDrive/honda_cars',
+    transform=train_transform
+)
 
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.conv2(x))
-        x = self.pool(x)
-        x = self.gap(x)
-        x = torch.flatten(x, 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.log_softmax(self.fc3(x), dim=1)
-        return x
+val_size = int(len(full_dataset) * 0.1)
+train_size = len(full_dataset) - val_size
+train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-net = HondaNet()
-net.to(device)
+# validation must NOT have augmentations
+val_dataset.dataset.transform = test_transform
 
-loss_function = nn.NLLLoss()
-optimizer = optim.Adam(net.parameters(), lr=0.001)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
 
-epochs = 10
-for epoch in range(epochs):
+class_names = full_dataset.classes
+num_classes = len(class_names)
+
+
+# -------------------------------------------------------
+# MODEL (ResNet18)
+# -------------------------------------------------------
+net = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+num_features = net.fc.in_features
+net.fc = nn.Linear(num_features, num_classes)
+net = net.to(device)
+
+
+# -------------------------------------------------------
+# STAGE 1 — TRAIN FC ONLY
+# -------------------------------------------------------
+for param in net.parameters():
+    param.requires_grad = False
+for param in net.fc.parameters():
+    param.requires_grad = True
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(net.fc.parameters(), lr=1e-3)
+
+print("Stage 1: training classifier head only...")
+for epoch in range(5):
+    net.train()
     running_loss = 0.0
 
-    for x, y in enumerate(train_loader):
-        inputs, labels = y[0].to(device), y[1].to(device)
-
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
 
         optimizer.zero_grad()
         outputs = net(inputs)
-        loss = loss_function(outputs, labels)
-
+        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item()
 
-        if x % 2000 == 1999:  # print every 2000 batches
-            print(f"[Epoch {epoch+1}/{epochs}, Batch {x+1}] loss: {running_loss / 2000:.6f}")
-            running_loss = 0.0
+    print(f"Epoch {epoch+1}/5 | Loss: {running_loss/len(train_loader):.4f}")
 
-print("Finished Training")
+
+# -------------------------------------------------------
+# STAGE 2 — UNFREEZE EVERYTHING + lower LR
+# -------------------------------------------------------
+for param in net.parameters():
+    param.requires_grad = True
+
+optimizer = optim.Adam(net.parameters(), lr=1e-4)
+
+print("Stage 2: fine-tuning entire model...")
+epochs = 25  # total 30
+
+for epoch in range(epochs):
+    net.train()
+    running_loss = 0.0
+
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    print(f"[Epoch {epoch+1}/{epochs}] Loss: {running_loss/len(train_loader):.4f}")
+
+
+print("Training complete.")
+
+
+# -------------------------------------------------------
+# PREDICTION FUNCTION
+# -------------------------------------------------------
+def predict_image(image_path, model, device, top_k=3):
+    model.eval()
+
+    transform = test_transform
+    image = Image.open(image_path).convert('RGB')
+    image = transform(image).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        outputs = model(image)
+        probs = F.softmax(outputs, dim=1)
+
+    top_probs, top_indices = probs.topk(top_k, dim=1)
+    top_probs = top_probs.cpu().numpy().flatten()
+    top_indices = top_indices.cpu().numpy().flatten()
+
+    top_class = class_names[top_indices[0]]
+    confidence = top_probs[0]
+    other_guesses = [(class_names[i], p) for i, p in zip(top_indices[1:], top_probs[1:])]
+
+    return top_class, confidence, other_guesses
+
+
