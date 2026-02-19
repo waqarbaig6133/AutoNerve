@@ -1,3 +1,4 @@
+[![License: Apache](https://img.shields.io/badge/license-Apache%202-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 # AutoNerve
 
 AutoNerve is an image-classification project that uses a CNN + ViT hybrid model (PyTorch) to classify car brands and models. It includes training and evaluation code and a Streamlit-based web GUI for easy inference and demo.
